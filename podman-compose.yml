@@ -1,0 +1,148 @@
+# podman-compose.yml
+version: "3"
+
+services:
+  # --- JAEGER (para OTLP) ---
+  jaeger:
+    image: jaegertracing/all-in-one:1.54
+    container_name: jaeger
+    ports:
+      - "16686:16686" # UI
+      - "4317:4317"   # OTLP gRPC (IMPORTANTE)
+      - "4318:4318"   # OTLP HTTP
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+      - COLLECTOR_OTLP_GRPC_HOST_PORT=0.0.0.0:4317
+      - COLLECTOR_OTLP_HTTP_HOST_PORT=0.0.0.0:4318
+    networks:
+      - obs-net
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:16686"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- PROMETHEUS ---
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - obs-net
+    depends_on:
+      - jaeger
+
+  # --- LOKI ---
+  loki:
+    image: grafana/loki:2.9.3
+    container_name: loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - obs-net
+    depends_on:
+      - jaeger
+
+  # --- GRAFANA ---
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+    volumes:
+      - ./grafana-provisioning:/etc/grafana/provisioning
+    networks:
+      - obs-net
+    depends_on:
+      - prometheus
+      - loki
+      - jaeger
+
+  # --- SERVICIO A ---
+  service-a:
+    build: ./java-app
+    container_name: service-a
+    environment:
+      - SERVICE_ID=A
+      - NEXT_SERVICE_URL=http://service-b:8080
+      - OTEL_SERVICE_NAME=service-a
+      # --- TRAZAS: Enviar a Jaeger ---
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      # --- MÉTRICAS: NO enviar a Jaeger (Prometheus las scrapea) ---
+      - OTEL_METRICS_EXPORTER=none
+      # --- LOGS: NO enviar a Jaeger (Loki los recibe vía logback) ---
+      - OTEL_LOGS_EXPORTER=none
+      # --- Evitar que el agente intente auto-configurar métricas OTLP ---
+      - OTEL_EXPORTER_OTLP_METRICS_ENABLED=false
+    ports:
+      - "127.0.0.1:8081:8080"  # Forzar binding a localhost para Podman rootless
+    networks:
+      - obs-net
+    depends_on:
+      jaeger:
+        condition: service_healthy
+
+  # --- SERVICIO B ---
+  service-b:
+    build: ./java-app
+    container_name: service-b
+    environment:
+      - SERVICE_ID=B
+      - NEXT_SERVICE_URL=http://service-c:8080
+      - OTEL_SERVICE_NAME=service-b
+      # --- TRAZAS: Enviar a Jaeger ---
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      # --- MÉTRICAS: NO enviar a Jaeger (Prometheus las scrapea) ---
+      - OTEL_METRICS_EXPORTER=none
+      # --- LOGS: NO enviar a Jaeger (Loki los recibe vía logback) ---
+      - OTEL_LOGS_EXPORTER=none
+      # --- Evitar que el agente intente auto-configurar métricas OTLP ---
+      - OTEL_EXPORTER_OTLP_METRICS_ENABLED=false
+    ports:
+      - "127.0.0.1:8082:8080"  # Forzar binding a localhost para Podman rootless
+    networks:
+      - obs-net
+    depends_on:
+      jaeger:
+        condition: service_healthy
+
+  # --- SERVICIO C ---
+  service-c:
+    build: ./java-app
+    container_name: service-c
+    environment:
+      - SERVICE_ID=C
+      - NEXT_SERVICE_URL=
+      - OTEL_SERVICE_NAME=service-c
+      # --- TRAZAS: Enviar a Jaeger ---
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      # --- MÉTRICAS: NO enviar a Jaeger (Prometheus las scrapea) ---
+      - OTEL_METRICS_EXPORTER=none
+      # --- LOGS: NO enviar a Jaeger (Loki los recibe vía logback) ---
+      - OTEL_LOGS_EXPORTER=none
+      # --- Evitar que el agente intente auto-configurar métricas OTLP ---
+      - OTEL_EXPORTER_OTLP_METRICS_ENABLED=false
+    ports:
+      - "127.0.0.1:8083:8080"  # Forzar binding a localhost para Podman rootless
+    networks:
+      - obs-net
+    depends_on:
+      jaeger:
+        condition: service_healthy
+
+networks:
+  obs-net:
+    driver: bridge

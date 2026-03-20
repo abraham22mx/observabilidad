@@ -1,0 +1,25 @@
+<!-- java-app/src/main/resources/logback-spring.xml -->
+<configuration>
+    <!-- Definir el patrón explícitamente -->
+    <property name="LOG_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"/>
+    
+    <appender name="LOKI" class="com.github.loki4j.logback.Loki4jAppender">
+        <http>
+            <url>http://loki:3100/loki/api/v1/push</url>
+        </http>
+        <format>
+            <label>
+                <pattern>app=obs-service,service=${SERVICE_ID:-unknown}</pattern>
+            </label>
+            <message>
+                <!-- Usar el patrón definido arriba -->
+                <pattern>${LOG_PATTERN}</pattern>
+            </message>
+        </format>
+        <verbose>false</verbose>
+    </appender>
+
+    <root level="INFO">
+        <appender-ref ref="LOKI"/>
+    </root>
+</configuration>

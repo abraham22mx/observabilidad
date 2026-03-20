@@ -1,0 +1,13 @@
+# grafana-provisioning/dashboards/dashboards.yml
+apiVersion: 1
+
+providers:
+  - name: 'Observability Lab'
+    orgId: 1
+    folder: 'Lab'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
